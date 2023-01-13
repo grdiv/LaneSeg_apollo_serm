@@ -46,16 +46,16 @@ def get_serm_color_labels():
                        [[16, 16, 16]], #8 other road markings
                        ])
 def get_serm_gray_labels():
-    return np.asarray([[0], #0 bg
+    return [[0], #0 bg
                        [1], #1 slow down
-                       [2,3,4,5,6],  #2 arrow
+                       [2,3,4,5,6,16],  #2 arrow
                        [7], # 3 crosswalk
                        [8,9,10,11,12], #4 lines
                        [13], #5 stop line
-                       [14], #6 number
-                       [15], #7 text
-                       [16], #8 other road markings
-                       ])
+                       [14], #6ignored number
+                       [15], #6ignored text
+                    #    [16], #放到arrow中
+                       ]
     
 def encode_segmap(mask):#颜色图转类别标签
     mask = mask.astype(int)
@@ -94,7 +94,7 @@ def decode_segmap(label_mask, dataset, plot=False):#类别标签转颜色图标�
 def encode_segmap_gray_serm(mask):
     mask = mask.astype(np.int16)
     label_mask = np.zeros((mask.shape[0], mask.shape[1]), dtype=np.int16)
-    for ii , _label in enumerate(get_apollo_gray_labels()):
+    for ii , _label in enumerate(get_serm_gray_labels()):
         for label in _label:
             label_mask[mask == label] = ii
     label_mask = label_mask.astype(np.int16)
@@ -199,4 +199,46 @@ def decode_color_labels(labels):
     decode_mask[1][labels == 7] = 128
     decode_mask[2][labels == 7] = 0
 
+    return decode_mask
+
+
+def decode_color_labels_serm(labels):
+    decode_mask = np.zeros((3, labels.shape[0], labels.shape[1]), dtype='uint8')
+    # 0 bg(0)
+    decode_mask[0][labels == 0] = 0
+    decode_mask[1][labels == 0] = 0
+    decode_mask[2][labels == 0] = 0
+    # 1 slow down(1)
+    decode_mask[0][labels == 1] = 0
+    decode_mask[1][labels == 1] = 0
+    decode_mask[2][labels == 1] = 155
+    # 2 arrow(2-6)
+    decode_mask[0][labels == 2] = 0
+    decode_mask[1][labels == 2] = 128
+    decode_mask[2][labels == 2] = 255
+    # 3 crosswalks(7)
+    decode_mask[0][labels == 3] = 255
+    decode_mask[1][labels == 3] = 0
+    decode_mask[2][labels == 3] = 255
+    # 4 lines(8-12)
+    decode_mask[0][labels == 4] = 0
+    decode_mask[1][labels == 4] = 255
+    decode_mask[2][labels == 4] = 0
+    # 5 stop lines(13)
+    decode_mask[0][labels == 5] = 255
+    decode_mask[1][labels == 5] = 0
+    decode_mask[2][labels == 5] = 0
+    # 6 numbers(14)
+    decode_mask[0][labels == 6] = 64
+    decode_mask[1][labels == 6] = 192
+    decode_mask[2][labels == 6] = 64
+    # 7 texts(15)
+    decode_mask[0][labels == 7] = 128
+    decode_mask[1][labels == 7] = 192
+    decode_mask[2][labels == 7] = 128
+    # 8 other road masks(16)
+    decode_mask[0][labels == 8] = 128
+    decode_mask[1][labels == 8] = 64
+    decode_mask[2][labels == 8] = 80
+    
     return decode_mask

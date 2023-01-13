@@ -53,6 +53,12 @@ class Trainer(object):
         self.criterion2 = SegmentationLosses(weight=None, cuda=args.cuda).build_loss(mode='dice')
         self.model, self.optimizer = model, optimizer
         
+        # model size
+        # from torchstat import stat
+        from torchsummary import summary
+        # stat(model, (3,320,1280))
+        summary(model.cuda(), (3,320,1280))
+                
         # Define Evaluator
         self.evaluator = Evaluator(self.nclass)
         # Define lr scheduler

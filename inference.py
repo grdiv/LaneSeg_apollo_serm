@@ -9,24 +9,29 @@ from dataloaders import make_data_loader
 from modeling.deeplab import *
 from utils.loss import SegmentationLosses
 from utils.metrics import Evaluator
-from dataloaders.utils_zzm import decode_color_labels, decode_segmap, decode_segmap_gray_apollo, encode_segmap
+from dataloaders.utils_zzm import decode_color_labels, decode_segmap, decode_segmap_gray_apollo, encode_segmap, decode_color_labels_serm
 from tqdm import tqdm
 from dataloaders import custom_transforms as tr
 from torchvision import transforms
+from torchstat import stat
+from torchsummary import summary
+
+from thop import profile
+from thop import clever_format
 
 def makeargs():
     parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Training")
-    parser.add_argument('--backbone', type=str, default='mobilenet',  ##########################改backbone
+    parser.add_argument('--backbone', type=str, default='resnet',  ##########################改backbone
                         choices=['resnet', 'xception', 'drn', 'mobilenet'],
                         help='backbone name (default: resnet)')
     parser.add_argument('--output_stride', type=int, default=16,
                         help='network output stride (default: 8)')
-    parser.add_argument('--dataset', type=str, default='apollo',
+    parser.add_argument('--dataset', type=str, default='serm',
                         choices=['pascal', 'coco', 'cityscapes', 'apollo'],
                         help='dataset name (default: pascal)')
     # parser.add_argument('--use-sbd', action='store_true', default=False,
     #                     help='whether to use SBD dataset (default: True)')
-    parser.add_argument('--workers', type=int, default=4,
+    parser.add_argument('--workers', type=int, default=2,
                         metavar='N', help='dataloader threads')
     parser.add_argument('--base-size', type=int, default=513,
                         help='base image size')
@@ -106,7 +111,8 @@ def makeargs():
             'coco': 30,
             'cityscapes': 200,
             'pascal': 50,
-            'apollo':20
+            'apollo':20,
+            'serm':100,
         }
         args.epochs = epoches[args.dataset.lower()]
 
@@ -121,7 +127,8 @@ def makeargs():
             'coco': 0.1,
             'cityscapes': 0.01,
             'pascal': 0.007,
-            'apollo': 0.01
+            'apollo': 0.01,
+            'serm': 0.01,
         }
         args.lr = lrs[args.dataset.lower()] / (4 * len(args.gpu_ids)) * args.batch_size
 
@@ -222,7 +229,7 @@ def test(model_path):
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
     train_loader, val_loader, test_loader, nclass = make_data_loader(args, **kwargs)
     print('Loading model...')
-    model = DeepLab(num_classes=8, backbone='drn', output_stride=args.output_stride,
+    model = DeepLab(num_classes=9, backbone='drn', output_stride=args.output_stride,
                     sync_bn=args.sync_bn, freeze_bn=args.freeze_bn)
     model.eval()
     checkpoint = torch.load(model_path)
@@ -264,7 +271,7 @@ def test(model_path):
 
 #解构inference过程
 IMAGE_SIZE = [(1024, 384), (1536,512), (3384,1020), (2048, 768), (1636, 640)]
-
+IMAGE_SIZE_serm = [(1280,320)]
 
 def transform(sample, cropsize=IMAGE_SIZE[1], offset=690):#####################此处更改IMAGE_SIZE选择
     roi_image = sample['image'].crop((0,offset,3384,1710))
@@ -287,7 +294,7 @@ def expand_resize_data(prediction=None, submission_size=[3384, 1710], offset=690
 def load_model(model_path):
     args = makeargs()
     print('Loading model...')
-    model = DeepLab(num_classes=8,backbone=args.backbone, output_stride=args.output_stride,#改backbone
+    model = DeepLab(num_classes=9,backbone=args.backbone, output_stride=args.output_stride,#改backbone
                    sync_bn=args.sync_bn,freeze_bn=args.freeze_bn)
     model.eval()
     checkpoint = torch.load(model_path)
@@ -298,7 +305,7 @@ def load_model(model_path):
 
 def unziptest(model_path):
     model = load_model(model_path)
-    sub_dir = './test_example/test_example_size1_69epoch_color/'
+    sub_dir = 'test_images/'
     Test_dir = pd.read_csv("data_list/test_lite.csv")
     test_dir = Test_dir["image"].values
     test_dir_lb = Test_dir["label"].values
@@ -328,8 +335,99 @@ def unziptest(model_path):
         # added = cv2.addWeighted(img_ori, 1, color_labels, 0.3, 0)
         cv2.imwrite(os.path.join(sub_dir, test_dir[i][-29:]), color_labels)
 
+
+def model_inference(model, image):
+    _img = Image.fromarray(image)
+    # _img = _img.resize((1280,320), Image.NEAREST)
+    
+    composed_transform  = transforms.Compose([
+        tr.Normalize_test(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        tr.ToTensor_test()])
+    _img = composed_transform(_img)
+    
+    _img = _img.unsqueeze(dim=0)
+    _img = _img.cuda()
+    
+    with torch.no_grad():
+        pred = model(_img)
+    pred = torch.softmax(pred, dim=1)
+    pred = torch.argmax(pred, dim=1)
+    pred = torch.squeeze(pred)
+    pred = pred.detach().cpu().numpy()
+    # print("inference done %d of %d" % (i, len(img_list)))
+    # prediction = expand_resize_data(pred)
+    prediction = pred
+    color_labels = decode_color_labels_serm(prediction)
+    color_labels = np.transpose(color_labels, (1, 2, 0))
+    
+    return color_labels
+
+def test_image(model_path, test_img_dir, dataset):
+    model = load_model(model_path)
+    
+    # flops, params = profile(model.cpu(), inputs=(torch.randn(1, 3, 320, 1280),))
+    # flops, params = clever_format([flops, params], '%.3f')
+    
+    # print('模型参数： ',params)
+    # print('每一个样本浮点数运算：',flops)
+    
+    origin = np.array([])
+    
+    img_list = [os.path.join(test_img_dir, f) for f in os.listdir(test_img_dir)]
+    
+    import random
+    perm = list(range(len(img_list)))
+    random.shuffle(perm)
+    img_list2 = [img_list[index] for index in perm]
+    img_list = img_list2[:5]
+    
+    for img in img_list:
+        
+        if dataset == 'cityscapes':   # 1024,2048
+            image = cv2.imread(img, )
+            image1 = image[384:705, 384:1665]
+            image2 = image[705:, 384:1665]
+            
+            origin = image[384:, 384:1665]
+            
+            color_label1 = model_inference(model, image1)
+            color_label2 = model_inference(model, image2)
+
+            color_label = np.vstack((color_label1, color_label2))
+            
+            cv2.imshow('test', color_label)
+            cv2.waitKey(0)
+        
+        if dataset == 'kaist':
+            # image = cv2.imread(img, -1)
+            # image = cv2.cvtColor(image, cv2.COLOR_BayerBG2RGB)
+            image = cv2.imread(img)
+            origin = image[240:,:]
+            color_label = model_inference(model, image[240:,:])
+            
+        else:
+            image = cv2.imread(img)
+            origin = image.copy()
+            color_label = model_inference(model, image)
+            
+        out = np.vstack((origin,color_label))
+        # out = np.vstack((origin,color_labels))
+        # cv2.imwrite(os.path.join('test_images_res', img.split('/')[-1]), color_labels)
+        cv2.imwrite(os.path.join('test_images_res', img.split('/')[-1]), out)
+    pass
+
 if __name__ == "__main__":
     #快速inference
-    model_path = 'run/apollo/deeplab-mobilenet/size1_69epoch/checkpoint.pth.tar'
+    # model_path = 'run/apollo/deeplab-mobilenet/size1_69epoch/checkpoint.pth.tar'
+    # model_path = 'checkpoints/model_best.pth.tar'
+    # model_path = '/home/dfs/下载/model_best.pth.tar'
+    # model_path = '/home/dfs/下载/checkpoint.pth.tar'
+    model_path = '/home/dfs/下载/test1/checkpoint.pth.tar'
     # test(model_path)
-    unziptest(model_path)
+    # unziptest(model_path)
+    test_img_dir = 'test_images'
+    # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/cityscapes'
+    # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/kaist'
+    # test_img_dir = '/media/dfs/Samsung_T5/dataset/kaist/urban29/image/stereo_left'
+    # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/kitti'
+    test_image(model_path, test_img_dir, dataset='serm')
