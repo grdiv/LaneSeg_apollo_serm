@@ -24,7 +24,7 @@ def makeargs():
     parser.add_argument('--backbone', type=str, default='resnet',  ##########################改backbone
                         choices=['resnet', 'xception', 'drn', 'mobilenet'],
                         help='backbone name (default: resnet)')
-    parser.add_argument('--output_stride', type=int, default=16,
+    parser.add_argument('--output_stride', type=int, default=8,
                         help='network output stride (default: 8)')
     parser.add_argument('--dataset', type=str, default='serm',
                         choices=['pascal', 'coco', 'cityscapes', 'apollo'],
@@ -229,7 +229,7 @@ def test(model_path):
     kwargs = {'num_workers': args.workers, 'pin_memory': True}
     train_loader, val_loader, test_loader, nclass = make_data_loader(args, **kwargs)
     print('Loading model...')
-    model = DeepLab(num_classes=9, backbone='drn', output_stride=args.output_stride,
+    model = DeepLab(num_classes=9, backbone='resnet', output_stride=args.output_stride,
                     sync_bn=args.sync_bn, freeze_bn=args.freeze_bn)
     model.eval()
     checkpoint = torch.load(model_path)
@@ -337,13 +337,17 @@ def unziptest(model_path):
 
 
 def model_inference(model, image):
-    _img = Image.fromarray(image)
+    # _img = Image.fromarray(image)
     # _img = _img.resize((1280,320), Image.NEAREST)
     
     composed_transform  = transforms.Compose([
         tr.Normalize_test(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         tr.ToTensor_test()])
-    _img = composed_transform(_img)
+    # image = image.astype(np.float32)
+    # image /= 100.
+    # image[image>=100] = 1.0
+    
+    _img = composed_transform(image)
     
     _img = _img.unsqueeze(dim=0)
     _img = _img.cuda()
@@ -379,7 +383,7 @@ def test_image(model_path, test_img_dir, dataset):
     perm = list(range(len(img_list)))
     random.shuffle(perm)
     img_list2 = [img_list[index] for index in perm]
-    img_list = img_list2[:5]
+    img_list = img_list2
     
     for img in img_list:
         
@@ -402,8 +406,13 @@ def test_image(model_path, test_img_dir, dataset):
             # image = cv2.imread(img, -1)
             # image = cv2.cvtColor(image, cv2.COLOR_BayerBG2RGB)
             image = cv2.imread(img)
+            
             origin = image[240:,:]
             color_label = model_inference(model, image[240:,:])
+            
+            # image = cv2.resize(image, (1280,320), cv2.INTER_NEAREST)
+            # origin = image
+            # color_label = model_inference(model, image)
             
         else:
             image = cv2.imread(img)
@@ -412,22 +421,24 @@ def test_image(model_path, test_img_dir, dataset):
             
         out = np.vstack((origin,color_label))
         # out = np.vstack((origin,color_labels))
-        # cv2.imwrite(os.path.join('test_images_res', img.split('/')[-1]), color_labels)
         cv2.imwrite(os.path.join('test_images_res', img.split('/')[-1]), out)
+        # cv2.imwrite(os.path.join('/media/dfs/Samsung_T5/dataset/kaist/urban29/image/deeplabv3-训练历史1', img.split('/')[-1]), out)
     pass
 
 if __name__ == "__main__":
     #快速inference
     # model_path = 'run/apollo/deeplab-mobilenet/size1_69epoch/checkpoint.pth.tar'
-    # model_path = 'checkpoints/model_best.pth.tar'
+    model_path = 'checkpoints/model_best.pth.tar'  # urban29预测用的这个
+    # model_path = 'checkpoints/checkpoint.pth.tar'
     # model_path = '/home/dfs/下载/model_best.pth.tar'
     # model_path = '/home/dfs/下载/checkpoint.pth.tar'
-    model_path = '/home/dfs/下载/test1/checkpoint.pth.tar'
+    # model_path = '/home/dfs/下载/test1/checkpoint.pth.tar'
     # test(model_path)
     # unziptest(model_path)
-    test_img_dir = 'test_images'
+    # test_img_dir = 'test_images' # serm
     # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/cityscapes'
-    # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/kaist'
+    test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/kaist/urban29'
+    # test_img_dir = '/media/dfs/Samsung_T5/dataset/kaist/urban29/image/stereo_left'
     # test_img_dir = '/media/dfs/Samsung_T5/dataset/kaist/urban29/image/stereo_left'
     # test_img_dir = '/home/dfs/GIthub/semantic_segmentation/test_images/kitti'
-    test_image(model_path, test_img_dir, dataset='serm')
+    test_image(model_path, test_img_dir, dataset='kaist')

@@ -2,7 +2,7 @@
 Author: dfs
 Date: 2023-01-01 21:31:38
 LastEditors: dfs
-LastEditTime: 2023-01-01 22:32:46
+LastEditTime: 2023-01-14 13:11:13
 Description: dfs
 '''
 
@@ -28,6 +28,6 @@ train_part = pd.DataFrame(train_list, columns=['Image','Label'])
 val_part = pd.DataFrame(val_list, columns=['Image','Label'])
 
 train_part.to_csv('data_list/train_lite.csv')
-train_part.to_csv('data_list/val_lite.csv')
+val_part.to_csv('data_list/val_lite.csv')
 
 pass
